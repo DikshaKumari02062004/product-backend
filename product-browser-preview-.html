@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Product Browser — Preview</title>
+<style>
+:root {
+  --bg: #0f1115;
+  --surface: #171a21;
+  --surface-2: #1f232c;
+  --border: #2a2f3a;
+  --text: #e7e9ee;
+  --muted: #8b92a3;
+  --accent: #6ea8fe;
+  --accent-2: #8ee3c8;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+.banner { background: #2a2210; border-bottom: 1px solid #4d3f14; color: #f0d27a; padding: 8px 24px; font-size: 12px; text-align: center; }
+.topbar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 24px; background: rgba(15,17,21,0.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.topbar h1 { font-size: 18px; margin: 0; font-weight: 600; }
+.controls { display: flex; align-items: center; gap: 12px; }
+select { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 14px; }
+.total-count { color: var(--muted); font-size: 13px; }
+main { padding: 24px; max-width: 1200px; margin: 0 auto; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 6px; animation: fadeIn 0.25s ease-out; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+.card .category { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--accent-2); }
+.card .name { font-size: 14px; font-weight: 600; line-height: 1.3; }
+.card .price { font-size: 15px; color: var(--accent); font-weight: 700; margin-top: auto; }
+.card .meta { font-size: 11px; color: var(--muted); }
+.status { text-align: center; padding: 24px 0; color: var(--muted); font-size: 13px; }
+#sentinel { height: 1px; }
+</style>
+</head>
+<body>
+  <div class="banner"></div>
+  <header class="topbar">
+    <h1>Product Browser</h1>
+    <div class="controls">
+      <select id="categoryFilter">
+        <option value="">All categories</option>
+      </select>
+      <span id="totalCount" class="total-count"></span>
+    </div>
+  </header>
+  <main>
+    <div id="grid" class="grid"></div>
+    <div id="sentinel"></div>
+    <div id="status" class="status"></div>
+  </main>
+
+<script>
+// ---- Mock backend, simulating the real cursor-paginated API in-browser ----
+const CATEGORIES = ['Electronics','Apparel','Home & Kitchen','Books','Beauty','Sports & Outdoors','Toys & Games','Grocery','Automotive','Office Supplies'];
+const TOTAL = 200000;
+const ALL = [];
+(function generate() {
+  let t = Date.now();
+  for (let i = TOTAL; i >= 1; i--) {
+    t -= Math.floor(Math.random() * 5000);
+    ALL.push({
+      id: i,
+      name: 'Product ' + i + ' - ' + ['Pro','Lite','Max','Plus','Mini','Ultra','Standard','Classic'][Math.floor(Math.random()*8)],
+      category: CATEGORIES[Math.floor(Math.random()*CATEGORIES.length)],
+      price: (Math.random()*4990+10).toFixed(2),
+      created_at: new Date(t).toISOString(),
+    });
+    if (i < TOTAL - 4000) break; // only materialize a slice for the preview, lazily
+  }
+})();
+
+function mockFetchProducts({ cursor, category, limit }) {
+  let pool = category ? ALL.filter(p => p.category === category) : ALL;
+  let startIdx = 0;
+  if (cursor) {
+    const idx = pool.findIndex(p => p.id === cursor);
+    startIdx = idx + 1;
+  }
+  const page = pool.slice(startIdx, startIdx + limit);
+  const next_cursor = page.length === limit ? page[page.length - 1].id : null;
+  return { data: page, next_cursor, has_more: next_cursor !== null };
+}
+
+// ---- Same frontend logic as the real app (public/app.js), pointed at the mock ----
+const grid = document.getElementById('grid');
+const statusEl = document.getElementById('status');
+const categoryFilter = document.getElementById('categoryFilter');
+const totalCountEl = document.getElementById('totalCount');
+const sentinel = document.getElementById('sentinel');
+
+let cursor = null, loading = false, exhausted = false, currentCategory = '';
+
+function fmtPrice(p) { return '₹' + Number(p).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function fmtDate(iso) { return new Date(iso).toLocaleString(); }
+
+function renderCard(p) {
+  const el = document.createElement('div');
+  el.className = 'card';
+  el.innerHTML = `
+    <div class="category">${p.category}</div>
+    <div class="name">${p.name}</div>
+    <div class="price">${fmtPrice(p.price)}</div>
+    <div class="meta">Created ${fmtDate(p.created_at)}</div>
+  `;
+  return el;
+}
+
+function loadMore() {
+  if (loading || exhausted) return;
+  loading = true;
+  statusEl.textContent = 'Loading...';
+  setTimeout(() => { // simulate network latency
+    const result = mockFetchProducts({ cursor, category: currentCategory, limit: 30 });
+    for (const product of result.data) grid.appendChild(renderCard(product));
+    cursor = result.next_cursor;
+    exhausted = !result.has_more;
+    statusEl.textContent = exhausted ? 'You have reached the end (preview slice).' : '';
+    loading = false;
+  }, 150);
+}
+
+function resetAndLoad() {
+  grid.innerHTML = '';
+  cursor = null;
+  exhausted = false;
+  loadMore();
+}
+
+function loadCategories() {
+  for (const cat of CATEGORIES) {
+    const count = ALL.filter(p => p.category === cat).length;
+    const opt = document.createElement('option');
+    opt.value = cat;
+    opt.textContent = `${cat} (${count.toLocaleString()})`;
+    categoryFilter.appendChild(opt);
+  }
+  totalCountEl.textContent = `${TOTAL.toLocaleString()} products (preview shows a slice)`;
+}
+
+categoryFilter.addEventListener('change', () => { currentCategory = categoryFilter.value; resetAndLoad(); });
+
+const observer = new IntersectionObserver((entries) => { if (entries[0].isIntersecting) loadMore(); });
+observer.observe(sentinel);
+
+loadCategories();
+loadMore();
+</script>
+</body>
+</html>
